@@ -7,6 +7,7 @@ from std_msgs.msg import String, Bool
 from geometry_msgs.msg import Twist  
 from depthai_ros_msgs.msg import SpatialDetectionArray, SpatialDetection
 import rclpy                                    # Python library for ROS 2
+from datetime import datetime, timedelta
 
 class DetectMovementNode(Node):
     def __init__(self):
@@ -36,10 +37,33 @@ class DetectMovementNode(Node):
         
         self.tracking_items = {}
 
+        self.curr_tracking = {}
+
         self.move_cmd = Twist()
 
+
+        # Define states for state machine
+        self.state1 = 'start'
+        self.state2 = 'pause'
+        self.state3 = 'detect'
+        self.state4 = 'end'
+
+        self.curr_state = self.state1
+        self.next_state = self.state1
+
+        # Defind the time intervals in second
+
+        self.pause_interval = timedelta(seconds=3)
+        self.paused_time = datetime.now()
+        self.pause_stop_time = None
+        
+        self.detect_interval = timedelta(seconds=3)
+        self.detected_time = datetime.now()
+        self.detected_stop_time = None
+
+
     def image_callback(self, msg):
-        # self.get_logger().info("Image received")
+        self.get_logger().info("Image received")
         try:
             self.cv_image = self.bridge.imgmsg_to_cv2(msg, "bgr8")
             if self.cv_image is not None:
@@ -85,11 +109,12 @@ class DetectMovementNode(Node):
 
     def detect_callback(self, msg):
         # self.get_logger().info("Detect image received")
-        current_tracking = {
+        self.curr_tracking = {
             'left': 0,
             'right': 0,
             'middle': 0
         }
+
         temp_holder = []
         if len(msg.detections) > 0:
             for detection in msg.detections:
@@ -109,36 +134,99 @@ class DetectMovementNode(Node):
                     bbox_max_y = bbox.center.y + bbox.size_y / 2
                     print(position.x, position.y, position.z)
                     temp_holder.append([bbox_center_x, bbox_center_y, bbox_min_x, bbox_min_y, bbox_max_x, bbox_max_y, position.x, position.y, position.z])
-        if (temp_holder.__len__() == 3):
+        
+        print(temp_holder)
+        if len(temp_holder) == 3:
             # get left tracking item and right
             temp_holder.sort(key=lambda x: x[0])
             left = temp_holder[0]
             middle = temp_holder[1]
             right = temp_holder[2]
 
-            current_tracking['left'] = left
-            current_tracking['right'] = right
-            current_tracking['middle'] = middle
+            self.curr_tracking['left'] = left
+            self.curr_tracking['right'] = right
+            self.curr_tracking['middle'] = middle
 
-        if self.tracking_items.__len__() != 0:
-            for key in self.tracking_items.keys():
+            if self.curr_state == self.state3 and not self.tracking_items:
+                self.tracking_items['left'] = left
+                self.tracking_items['right'] = right
+                self.tracking_items['middle'] = middle
 
-                curr_left = current_tracking[key]
-                prev_left = self.tracking_items[key]
-                if abs((curr_left[-3] - prev_left[-3])) > 0.01:
-                    # some action
-                    self.get_logger().info(key + " person moved")
-                if abs((curr_left[-2] - prev_left[-2])) > 0.01:
-                    # some action
-                    self.get_logger().info(key + " person moved")
-                if abs((curr_left[-1] - prev_left[-1])) > 0.01:
-                    # some action
-                    self.get_logger().info(key + " person moved")
+        self.update_state_machine()
+
+        # if self.tracking_items.__len__() != 0:
+        #     for key in self.tracking_items.keys():
+        #         curr_left = self.curr_tracking[key]
+        #         prev_left = self.tracking_items[key]
+        #         if abs((curr_left[-3] - prev_left[-3])) > 0.01:
+        #             # some action
+        #             self.get_logger().info(key + " person moved")
+        #         if abs((curr_left[-2] - prev_left[-2])) > 0.01:
+        #             # some action
+        #             self.get_logger().info(key + " person moved")
+        #         if abs((curr_left[-1] - prev_left[-1])) > 0.01:
+        #             # some action
+        #             self.get_logger().info(key + " person moved")
+
+
+    def update_state_machine(self):
+
+        """
+        Due to the mechanism of this game, the game will keep running when they are players detected
+        otherwise, the game will stop.
+
+        During the game is running, this method will include 4 states, thsoe are:
+            1. start -> pause
+            2. pause (an interval for players moving to safe area, the interval will be fixed)
+            3. detect (detect if players are moved or not within time interval)
+                if the users are moving:
+                    report them
+                    -> detect
+                else:
+                    -> pause
+        If there is no player detected, the game will end.
+            4. end
+                state -> end
+        """
+
+
+        if len(self.tracking_items) > 0:
+            if self.curr_state == self.state1:
+                self.next_state = self.state2
+                self.paused_time = datetime.now()
+            elif self.curr_state == self.state2:
+                if datetime.now() >= self.paused_time + self.pause_interval:
+                    self.next_state = self.state3
+                    self.detected_time = datetime.now()
+            elif self.curr_state == self.state3:
+                if datetime.now() <= self.detected_time + self.detect_interval:
+                    for key in self.tracking_items.keys():
+                        curr_left = self.curr_tracking[key]
+                        prev_left = self.tracking_items[key]
+                        if abs((curr_left[-3] - prev_left[-3])) > 0.01:
+                            # some action
+                            self.get_logger().info(key + " person moved")
+                        if abs((curr_left[-2] - prev_left[-2])) > 0.01:
+                            # some action
+                            self.get_logger().info(key + " person moved")
+                        if abs((curr_left[-1] - prev_left[-1])) > 0.01:
+                            # some action
+                            self.get_logger().info(key + " person moved")
+                else:
+                    self.next_state = self.state2
+                    self.tracking_items = {}
+                    self.paused_time = datetime.now()
+        else:
+            self.curr_state = self.state4
         
-#
+        self.curr_state = self.next_state
+
+    
+
 def main():
     rclpy.init()
     detect_movement_node = DetectMovementNode()
+    print('main')
     rclpy.spin(detect_movement_node)
     detect_movement_node.destroy_node()
     rclpy.shutdown()
