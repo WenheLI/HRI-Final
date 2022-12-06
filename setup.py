@@ -20,7 +20,9 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'detect_movement_node = hide_seek.detect_movement_node:main'
+            'detect_movement_node = hide_seek.detect_movement_node:main',
+            'countdown_node = hide_seek.countdown:main',
+            'calling_node = hide_seek.callingout:main'
         ],
     },
 )

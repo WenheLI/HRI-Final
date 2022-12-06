@@ -3,11 +3,12 @@ from rclpy.node import Node
 from sensor_msgs.msg import Image
 from cv_bridge import CvBridge, CvBridgeError 
 import numpy as np
-from std_msgs.msg import String, Bool
+from std_msgs.msg import String, Int16
 from geometry_msgs.msg import Twist  
 from depthai_ros_msgs.msg import SpatialDetectionArray, SpatialDetection
 import rclpy                                    # Python library for ROS 2
 from datetime import datetime, timedelta
+import time
 
 class DetectMovementNode(Node):
     def __init__(self):
@@ -34,7 +35,18 @@ class DetectMovementNode(Node):
         self.talker_pub = self.create_publisher(
             String, "/talk", 1
         )
+
+        self.count_down_pub = self.create_publisher(
+            Int16, "/hide/countdown", 1
+        )
+
+        self.calling_out_pub = self.create_publisher(
+            String, "/hide/callingout", 1
+        )
         
+        
+        self.target_person = ''
+
         self.tracking_items = {}
 
         self.curr_tracking = {}
@@ -154,21 +166,6 @@ class DetectMovementNode(Node):
 
         self.update_state_machine()
 
-        # if self.tracking_items.__len__() != 0:
-        #     for key in self.tracking_items.keys():
-        #         curr_left = self.curr_tracking[key]
-        #         prev_left = self.tracking_items[key]
-        #         if abs((curr_left[-3] - prev_left[-3])) > 0.01:
-        #             # some action
-        #             self.get_logger().info(key + " person moved")
-        #         if abs((curr_left[-2] - prev_left[-2])) > 0.01:
-        #             # some action
-        #             self.get_logger().info(key + " person moved")
-        #         if abs((curr_left[-1] - prev_left[-1])) > 0.01:
-        #             # some action
-        #             self.get_logger().info(key + " person moved")
-
-
     def update_state_machine(self):
 
         """
@@ -190,34 +187,37 @@ class DetectMovementNode(Node):
         """
 
 
-        if len(self.tracking_items) > 0:
-            if self.curr_state == self.state1:
-                self.next_state = self.state2
-                self.paused_time = datetime.now()
-            elif self.curr_state == self.state2:
-                if datetime.now() >= self.paused_time + self.pause_interval:
-                    self.next_state = self.state3
-                    self.detected_time = datetime.now()
-            elif self.curr_state == self.state3:
-                if datetime.now() <= self.detected_time + self.detect_interval:
-                    for key in self.tracking_items.keys():
-                        curr_left = self.curr_tracking[key]
-                        prev_left = self.tracking_items[key]
-                        if abs((curr_left[-3] - prev_left[-3])) > 0.01:
-                            # some action
-                            self.get_logger().info(key + " person moved")
-                        if abs((curr_left[-2] - prev_left[-2])) > 0.01:
-                            # some action
-                            self.get_logger().info(key + " person moved")
-                        if abs((curr_left[-1] - prev_left[-1])) > 0.01:
-                            # some action
-                            self.get_logger().info(key + " person moved")
-                else:
-                    self.next_state = self.state2
-                    self.tracking_items = {}
-                    self.paused_time = datetime.now()
-        else:
-            self.curr_state = self.state4
+        if self.curr_state == self.state1:
+            self.next_state = self.state2
+        elif self.curr_state == self.state2:
+            self.count_down_pub.publish(Int16(5))
+            time.sleep(5)
+            self.next_state = self.state3
+        elif self.curr_state == self.state3:
+            self.count_down_pub.publish(Int16(5))
+            time.sleep(5)
+            for key in self.tracking_items.keys():
+                curr_left = self.curr_tracking[key]
+                prev_left = self.tracking_items[key]
+                if abs((curr_left[-3] - prev_left[-3])) > 0.01:
+                    # some action
+                    self.next_state = self.state4
+                    self.target_person = 'left'
+                    self.get_logger().info(key + " person moved")
+                if abs((curr_left[-2] - prev_left[-2])) > 0.01:
+                    # some action
+                    self.next_state = self.state4
+                    self.target_person = 'middle'
+                    self.get_logger().info(key + " person moved")
+                if abs((curr_left[-1] - prev_left[-1])) > 0.01:
+                    # some action
+                    self.next_state = self.state4
+                    self.target_person = 'right'
+                    self.get_logger().info(key + " person moved")
+            self.next_state = self.state2
+        elif self.curr_state == self.state4:
+            self.calling_out_pub.publish(f'audio,{self.target_person}')
+
         
         self.curr_state = self.next_state
 
