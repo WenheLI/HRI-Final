@@ -20,6 +20,8 @@ class DetectMovementNode(Node):
         self.depth_image = None
         self.bridge = CvBridge()
 
+        self.cv_image = None
+
         self.detect_subscription = self.create_subscription(
             SpatialDetectionArray, "/color/yolov4_Spatial_detections", self.detect_callback, 5
         )
@@ -75,7 +77,6 @@ class DetectMovementNode(Node):
 
 
     def image_callback(self, msg):
-        self.get_logger().info("Image received")
         try:
             self.cv_image = self.bridge.imgmsg_to_cv2(msg, "bgr8")
             if self.cv_image is not None:
@@ -128,6 +129,11 @@ class DetectMovementNode(Node):
         }
 
         temp_holder = []
+        temp = self.cv_image
+        if self.cv_image is None:
+            return
+        temp = np.array(temp)
+        
         if len(msg.detections) > 0:
             for detection in msg.detections:
                 temp = detection.results[0]
@@ -137,7 +143,7 @@ class DetectMovementNode(Node):
                     bbox = detection.bbox
                     position = detection.position
 
-                    print(bbox.center, bbox.size_x, bbox.size_y)
+                    # print(bbox.center, bbox.size_x, bbox.size_y)
                     bbox_center_x = bbox.center.x
                     bbox_center_y = bbox.center.y
                     bbox_min_x = bbox.center.x - bbox.size_x / 2
@@ -146,8 +152,11 @@ class DetectMovementNode(Node):
                     bbox_max_y = bbox.center.y + bbox.size_y / 2
                     print(position.x, position.y, position.z)
                     temp_holder.append([bbox_center_x, bbox_center_y, bbox_min_x, bbox_min_y, bbox_max_x, bbox_max_y, position.x, position.y, position.z])
-        
-        print(temp_holder)
+        #   
+        print(len(temp_holder))
+        if len(temp_holder) != 3:
+            return
+
         if len(temp_holder) == 3:
             # get left tracking item and right
             temp_holder.sort(key=lambda x: x[0])
@@ -155,11 +164,13 @@ class DetectMovementNode(Node):
             middle = temp_holder[1]
             right = temp_holder[2]
 
+            # print(temp_holder)
+            
             self.curr_tracking['left'] = left
             self.curr_tracking['right'] = right
             self.curr_tracking['middle'] = middle
 
-            if self.curr_state == self.state3 and not self.tracking_items:
+            if not self.tracking_items:
                 self.tracking_items['left'] = left
                 self.tracking_items['right'] = right
                 self.tracking_items['middle'] = middle
@@ -185,40 +196,46 @@ class DetectMovementNode(Node):
             4. end
                 state -> end
         """
-
-
-        if self.curr_state == self.state1:
-            self.next_state = self.state2
-        elif self.curr_state == self.state2:
-            self.count_down_pub.publish(Int16(5))
-            time.sleep(5)
-            self.next_state = self.state3
-        elif self.curr_state == self.state3:
-            if datetime.now() <= self.detected_time + self.detect_interval:
-                for key in self.tracking_items.keys():
-                    curr_left = self.curr_tracking[key]
-                    prev_left = self.tracking_items[key]
-                    if abs((curr_left[-3] - prev_left[-3])) > 0.01:
-                        # some action
-                        self.next_state = self.state4
-                        self.target_person = 'left'
-                        self.get_logger().info(key + " person moved")
-                    if abs((curr_left[-2] - prev_left[-2])) > 0.01:
-                        # some action
-                        self.next_state = self.state4
-                        self.target_person = 'middle'
-                        self.get_logger().info(key + " person moved")
-                    if abs((curr_left[-1] - prev_left[-1])) > 0.01:
-                        # some action
-                        self.next_state = self.state4
-                        self.target_person = 'right'
-                        self.get_logger().info(key + " person moved")
-            else:
+        print('########################################################', self.curr_state)
+        if len(self.tracking_items) >= 0:
+            if self.curr_state == self.state1:
                 self.next_state = self.state2
-                self.tracking_items = {}
-                self.paused_time = datetime.now()
-        elif self.curr_state == self.state4:
-            self.calling_out_pub.publish(f'audio,{self.target_person}')
+            elif self.curr_state == self.state2:
+                # self.count_down_pub.publish(Int16(5))
+                print('state2')
+                time.sleep(5)
+                self.next_state = self.state3
+                self.detected_time = datetime.now()
+            elif self.curr_state == self.state3:
+                print('state3', datetime.now())
+                if not self.tracking_items:
+                    return 
+                if datetime.now() <= self.detected_time + self.detect_interval:
+                    print('people detected')
+                    print(self.tracking_items)
+                    for key in self.tracking_items.keys():
+                        curr_left = self.curr_tracking[key]
+                        prev_left = self.tracking_items[key]
+                        print(curr_left, prev_left)
+                        if abs((curr_left[-3] - prev_left[-3])) > 0.01:
+                            # some action
+                            self.target_person = 'left'
+                            self.get_logger().info(key + " person moved")
+                        if abs((curr_left[-2] - prev_left[-2])) > 0.01:
+                            # some action
+                            self.target_person = 'middle'
+                            self.get_logger().info(key + " person moved")
+                        if abs((curr_left[-1] - prev_left[-1])) > 0.01:
+                            # some action
+                            self.target_person = 'right'
+                            self.get_logger().info(key + " person moved")
+                else:
+                    self.next_state = self.state2
+                    # self.tracking_items = {}
+                    self.paused_time = datetime.now()
+        else:
+            self.next_state = self.state1
+            # self.calling_out_pub.publish(f'audio,{self.target_person}')
 
         
         self.curr_state = self.next_state
