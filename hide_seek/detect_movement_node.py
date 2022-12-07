@@ -237,7 +237,6 @@ class DetectMovementNode(Node):
             self.next_state = self.state1
             # self.calling_out_pub.publish(f'audio,{self.target_person}')
 
-        
         self.curr_state = self.next_state
 
     
